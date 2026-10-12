@@ -1,0 +1,3 @@
+DROP TABLE wager_transactions;
+DROP INDEX wager_transactions_provider_key_unique;
+DROP INDEX wager_transactions_provider_external_unique;
