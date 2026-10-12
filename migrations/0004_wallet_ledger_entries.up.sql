@@ -3,11 +3,11 @@ CREATE TABLE IF NOT EXISTS wallet_ledger_entries(
   wallet_id UUID NOT NULL REFERENCES wallets(id),
   transaction_id UUID NOT NULL REFERENCES wager_transactions (id),
   direction TEXT NOT NULL CHECK (direction IN ('DEBIT', 'CREDIT')),
-  currency CHAR(3) NOT NULL,
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   amount BIGINT NOT NULL CHECK (amount > 0),
   balance_before BIGINT NOT NULL CHECK (balance_before >= 0),
   balance_after BIGINT NOT NULL CHECK (balance_after >= 0),
-  created_at TIMESTAMPZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
   CONSTRAINT uq_wallet_transaction UNIQUE (wallet_id, transaction_id)
 );
 

@@ -3,10 +3,10 @@ CREATE TABLE IF NOT EXISTS outbox(
   aggregate_id UUID NOT NULL,
   event_type TEXT NOT NULL,
   payload JSONB NOT NULL,
-  occurred_at TIMESTAMPZ NOT NULL,
-  attempts INT NOT NULL DEFAULT 0,
-  next_delivery_at TIMESTAMPZ NOT NULL DEFAULT now(),
-  published_at TIMESTAMPZ
+  occurred_at TIMESTAMPTZ NOT NULL,
+  attempts INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_delivery_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ
 );
 
 CREATE INDEX idx_outbox_pending

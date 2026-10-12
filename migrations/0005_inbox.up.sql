@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS inbox (
   consumer_name TEXT NOT NULL,
   message_id TEXT NOT NULL,
   message_hash TEXT NOT NULL,
-  received_at TIMESTAMPZ NOT NULL,
-  completed_at TIMESTAMPZ NOT NULL,
-  PRIMARY KEY (consumer_id, message_id)
+  transaction_id UUID REFERENCES wager_transactions (id),
+  received_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (consumer_name, message_id)
 );
