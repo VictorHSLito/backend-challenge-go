@@ -1,0 +1,25 @@
+info:
+  name: Create Wallet
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: http://localhost:8080/wallets
+  body:
+    type: json
+    data: |-
+      {
+        "playerId": "d0d8d735-837d-4934-a40a-15b4a139b652",
+        "initialBalance": {
+          "amount": "520.00",
+          "currency": "BRL"
+        }
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

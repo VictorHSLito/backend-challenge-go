@@ -3,3 +3,5 @@
 !.env.example
 /bin/
 coverage.out
+bruno/**/.env
+bruno/**/secrets.json
