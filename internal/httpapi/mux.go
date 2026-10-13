@@ -18,5 +18,7 @@ func NewMux(pool *pgxpool.Pool, svc *service.Service, logger *slog.Logger) *http
 
 	mux.HandleFunc("GET /wagering/transactions/{transactionId}", GetTransactionHandler(svc, logger))
 	mux.HandleFunc("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", GetTransactionByProviderHandler(svc, logger))
+
+	mux.HandleFunc("POST /wagering/transactions", CreateTransactionHandler(svc, logger))
 	return mux
 }

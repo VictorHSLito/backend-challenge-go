@@ -24,6 +24,8 @@ type Repository interface {
 	InsertLedgerEntryTx(ctx context.Context, tx pgx.Tx, e ledger.Entry) error
 	GetTransactionByID(ctx context.Context, id string) (transaction.WagerTransaction, bool, error)
 	GetTransactionByProviderExternalID(ctx context.Context, providerID, externalTxID string) (transaction.WagerTransaction, bool, error)
+	UpdateWalletTx(ctx context.Context, tx pgx.Tx, w wallet.Wallet) error
+	GetTransactionByProviderIdempotencyKeyTx(ctx context.Context, tx pgx.Tx, providerID, idempotencyKey string) (transaction.WagerTransaction, bool, error)
 }
 
 type Service struct {

@@ -337,3 +337,38 @@ func (r *WalletRepo) GetTransactionByProviderExternalID(ctx context.Context, pro
 	}
 	return wt, true, nil
 }
+
+func (r *WalletRepo) UpdateWalletTx(ctx context.Context, tx pgx.Tx, w wallet.Wallet) error {
+	query := `
+		UPDATE wallets
+		SET balance_amount = $1, version = $2, updated_at = $3
+		WHERE id = $4
+	`
+	cmdTag, err := tx.Exec(ctx, query, w.Balance().Amount(), w.Version(), w.UpdatedAt(), w.ID())
+	if err != nil {
+		return fmt.Errorf("failed to update wallet: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return fmt.Errorf("wallet not found for update: %s", w.ID())
+	}
+	return nil
+}
+
+func (r *WalletRepo) GetTransactionByProviderIdempotencyKeyTx(ctx context.Context, tx pgx.Tx, providerID, idempotencyKey string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE provider_id = $1 AND idempotency_key = $2
+	`
+	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, providerID, idempotencyKey))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get transaction by provider idempotency key: %w", err)
+	}
+	return wt, true, nil
+}
