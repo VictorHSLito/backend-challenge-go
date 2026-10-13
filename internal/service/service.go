@@ -9,22 +9,27 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/victorhslito/junglegaming/internal/domain/ledger"
 	"github.com/victorhslito/junglegaming/internal/domain/money"
+	"github.com/victorhslito/junglegaming/internal/domain/transaction"
 	"github.com/victorhslito/junglegaming/internal/domain/wallet"
 )
 
-type WalletRepository interface {
-	InsertWallet(ctx context.Context, w wallet.Wallet) error
+type Repository interface {
+	RunInTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+	InsertWalletTx(ctx context.Context, tx pgx.Tx, w wallet.Wallet) error
 	GetWalletByID(ctx context.Context, id string) (wallet.Wallet, bool, error)
-	GetWalletForUpdate(ctx context.Context, tx pgx.Tx, id string) (wallet.Wallet, bool, error)
+	GetWalletForUpdateTx(ctx context.Context, tx pgx.Tx, id string) (wallet.Wallet, bool, error)
+	InsertWagerTransactionTx(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction) error
+	InsertLedgerEntryTx(ctx context.Context, tx pgx.Tx, e ledger.Entry) error
 }
 
 type Service struct {
-	repo   WalletRepository
+	repo   Repository
 	logger *slog.Logger
 }
 
-func NewService(repo WalletRepository, logger *slog.Logger) *Service {
+func NewService(repo Repository, logger *slog.Logger) *Service {
 	return &Service{repo: repo, logger: logger}
 }
 
@@ -37,18 +42,34 @@ func (s *Service) OpenWallet(ctx context.Context, playerID string, initialMoney 
 		return wallet.Wallet{}, money.ErrInvalidMoney
 	}
 
-	walletUUID, err := uuid.NewV7()
-	if err != nil {
-		return wallet.Wallet{}, fmt.Errorf("failed to generate uuidv7: %w", err)
-	}
+	walletUUID, _ := uuid.NewV7()
 
 	w, err := wallet.New(walletUUID.String(), playerID, initialMoney, time.Now())
 	if err != nil {
 		return wallet.Wallet{}, err
 	}
 
-	err = s.repo.InsertWallet(ctx, w)
-	if err != nil {
+	if initialMoney.IsZero() {
+		return w, s.repo.RunInTx(ctx, func(tx pgx.Tx) error {
+			return s.repo.InsertWalletTx(ctx, tx, w)
+		})
+	}
+
+	txID, _ := uuid.NewV7()
+	leID, _ := uuid.NewV7()
+	opening, _ := transaction.NewOpening(txID.String(), w.ID(), w.PlayerID(), initialMoney, time.Now())
+	zero, _ := money.Zero(initialMoney.Currency())
+	entry, _ := ledger.NewCredit(leID.String(), w.ID(), txID.String(), initialMoney, zero, time.Now())
+
+	if err := s.repo.RunInTx(ctx, func(tx pgx.Tx) error {
+		if err := s.repo.InsertWalletTx(ctx, tx, w); err != nil {
+			return err
+		}
+		if err := s.repo.InsertWagerTransactionTx(ctx, tx, opening); err != nil {
+			return err
+		}
+		return s.repo.InsertLedgerEntryTx(ctx, tx, entry)
+	}); err != nil {
 		return wallet.Wallet{}, err
 	}
 

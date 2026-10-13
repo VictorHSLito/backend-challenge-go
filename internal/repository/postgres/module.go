@@ -7,7 +7,7 @@ import (
 
 var Module = fx.Module("walletrepo",
 	fx.Provide(NewWalletRepo),
-	fx.Provide(func(r *WalletRepo) service.WalletRepository {
+	fx.Provide(func(r *WalletRepo) service.Repository {
 		return r
 	}),
 )
