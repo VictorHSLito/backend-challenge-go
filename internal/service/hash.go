@@ -81,8 +81,38 @@ func toReplayResult(wt transaction.WagerTransaction) ProcessTransactionResult {
 	}
 }
 
+func isReversible(reversal, original wager.Kind) bool {
+	if reversal == wager.KindRefund {
+		return original == wager.KindBet
+	}
+	if reversal == wager.KindRollback {
+		switch original {
+		case wager.KindBet, wager.KindWin, wager.KindRefund:
+			return true
+		}
+	}
+	return false
+}
+
+func reversalDirection(reversal, original wager.Kind) wager.Direction {
+	if reversal == wager.KindRefund {
+		return wager.DirectionCredit
+	}
+	switch original {
+	case wager.KindBet:
+		return wager.DirectionCredit
+	case wager.KindWin:
+		return wager.DirectionDebit
+	case wager.KindRefund:
+		return wager.DirectionDebit
+	}
+	panic("unreachable")
+}
+
 func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string, cmd ProcessTransactionCommand) (ProcessTransactionResult, error) {
-	if cmd.Kind != wager.KindBet {
+	switch cmd.Kind {
+	case wager.KindBet, wager.KindWin, wager.KindLoss, wager.KindRefund, wager.KindRollback:
+	default:
 		return ProcessTransactionResult{}, ErrUnsupportedKind
 	}
 
@@ -111,6 +141,8 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 			return ErrWalletNotFound
 		}
 
+		balanceBefore := w.Balance()
+
 		txID, _ := uuid.NewV7()
 		wt, err := transaction.NewExternal(
 			txID.String(), cmd.ProviderID, cmd.ExternalTransactionID,
@@ -121,44 +153,168 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 			return err
 		}
 
-		balanceBefore := w.Balance()
-		if err := w.Debit(cmd.Money, now); err != nil {
-			if errors.Is(err, wallet.ErrInsufficientBalance) {
-				if err := wt.MarkRejected("INSUFFICIENT_FUNDS", now); err != nil {
-					return err
-				}
-				if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
-					return err
-				}
-				result = ProcessTransactionResult{
-					TransactionID:    wt.ID(),
-					Status:           wt.Status(),
-					Balance:          balanceBefore,
-					FailureCode:      wt.FailureCode(),
-					IdempotentReplay: false,
-				}
-				return nil
+		persistRejected := func(code string, refInternalID string) error {
+			if refInternalID != "" {
+				_ = wt.BindReference(refInternalID, now)
 			}
-			return err
+			_ = wt.SetObservedBalance(balanceBefore)
+			if err := wt.MarkRejected(code, now); err != nil {
+				return err
+			}
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+			result = ProcessTransactionResult{
+				TransactionID:    wt.ID(),
+				Status:           wt.Status(),
+				Balance:          balanceBefore,
+				FailureCode:      wt.FailureCode(),
+				IdempotentReplay: false,
+			}
+			return nil
 		}
 
-		if err := wt.MarkProcessed(w.Balance(), w.Version(), now); err != nil {
-			return err
-		}
-		leID, _ := uuid.NewV7()
-		entry, err := ledger.NewDebit(leID.String(), w.ID(), wt.ID(), cmd.Money, balanceBefore, now)
-		if err != nil {
-			return err
-		}
+		switch cmd.Kind {
+		case wager.KindBet:
+			if err := w.Debit(cmd.Money, now); err != nil {
+				if errors.Is(err, wallet.ErrInsufficientBalance) {
+					return persistRejected(FailureInsufficientFunds, "")
+				}
+				return err
+			}
+			if err := wt.MarkProcessed(w.Balance(), w.Version(), now); err != nil {
+				return err
+			}
+			leID, _ := uuid.NewV7()
+			entry, err := ledger.NewDebit(leID.String(), w.ID(), wt.ID(), cmd.Money, balanceBefore, now)
+			if err != nil {
+				return err
+			}
 
-		if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
-			return err
-		}
-		if err := s.repo.UpdateWalletTx(ctx, tx, w); err != nil {
-			return err
-		}
-		if err := s.repo.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
-			return err
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+			if err := s.repo.UpdateWalletTx(ctx, tx, w); err != nil {
+				return err
+			}
+			if err := s.repo.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
+				return err
+			}
+
+		case wager.KindWin:
+			if err := w.Credit(cmd.Money, now); err != nil {
+				return err
+			}
+			if err := wt.MarkProcessed(w.Balance(), w.Version(), now); err != nil {
+				return err
+			}
+			leID, _ := uuid.NewV7()
+			entry, err := ledger.NewCredit(leID.String(), w.ID(), wt.ID(), cmd.Money, balanceBefore, now)
+			if err != nil {
+				return err
+			}
+
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+			if err := s.repo.UpdateWalletTx(ctx, tx, w); err != nil {
+				return err
+			}
+			if err := s.repo.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
+				return err
+			}
+
+		case wager.KindLoss:
+			if err := wt.MarkProcessed(w.Balance(), w.Version(), now); err != nil {
+				return err
+			}
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+
+		case wager.KindRefund, wager.KindRollback:
+			ref, found, err := s.repo.GetTransactionByProviderExternalIDTx(ctx, tx, cmd.ProviderID, cmd.ReferenceExternalTransactionID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return persistRejected(FailureReferenceNotFound, "")
+			}
+
+			if ref.Status() != wager.StatusProcessed {
+				return persistRejected(FailureReferenceNotProcessed, ref.ID())
+			}
+
+			if ref.ProviderID() != cmd.ProviderID ||
+				ref.PlayerID() != cmd.PlayerID ||
+				ref.WalletID() != cmd.WalletID ||
+				ref.Money().Currency() != cmd.Money.Currency() ||
+				ref.RoundID() != cmd.RoundID {
+				return persistRejected(FailureReferenceMismatch, ref.ID())
+			}
+
+			cmp, err := ref.Money().Compare(cmd.Money)
+			if err != nil {
+				return err
+			}
+			if cmp != 0 {
+				return persistRejected(FailureReferenceAmountMismatch, ref.ID())
+			}
+
+			if !isReversible(cmd.Kind, ref.Kind()) {
+				return persistRejected(FailureReferenceUnreversable, ref.ID())
+			}
+
+			existingRev, foundRev, err := s.repo.GetProcessedReversalTx(ctx, tx, cmd.ProviderID, ref.ID())
+			if err != nil {
+				return err
+			}
+			if foundRev {
+				_ = existingRev
+				return persistRejected(FailureReferenceAlreadyReversed, ref.ID())
+			}
+
+			if err := wt.BindReference(ref.ID(), now); err != nil {
+				return err
+			}
+
+			direction := reversalDirection(cmd.Kind, ref.Kind())
+			if direction == wager.DirectionCredit {
+				if err := w.Credit(cmd.Money, now); err != nil {
+					return err
+				}
+			} else {
+				if err := w.Debit(cmd.Money, now); err != nil {
+					if errors.Is(err, wallet.ErrInsufficientBalance) {
+						return persistRejected(FailureRollbackInsufficientFunds, ref.ID())
+					}
+					return err
+				}
+			}
+
+			if err := wt.MarkProcessed(w.Balance(), w.Version(), now); err != nil {
+				return err
+			}
+			leID, _ := uuid.NewV7()
+			var entry ledger.Entry
+			if direction == wager.DirectionCredit {
+				entry, err = ledger.NewCredit(leID.String(), w.ID(), wt.ID(), cmd.Money, balanceBefore, now)
+			} else {
+				entry, err = ledger.NewDebit(leID.String(), w.ID(), wt.ID(), cmd.Money, balanceBefore, now)
+			}
+			if err != nil {
+				return err
+			}
+
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+			if err := s.repo.UpdateWalletTx(ctx, tx, w); err != nil {
+				return err
+			}
+			if err := s.repo.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
+				return err
+			}
 		}
 
 		result = ProcessTransactionResult{

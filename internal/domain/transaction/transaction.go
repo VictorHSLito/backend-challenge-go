@@ -291,6 +291,14 @@ func (wt *WagerTransaction) MarkPendingReference(now time.Time) error {
 	return nil
 }
 
+func (wt *WagerTransaction) SetObservedBalance(balance money.Money) error {
+	if !balance.IsValid() {
+		return fmt.Errorf("%w: invalid observed balance", ErrInvalidAmount)
+	}
+	wt.observedBalance = balance
+	return nil
+}
+
 func (wt *WagerTransaction) BindReference(referenceTransactionID string, now time.Time) error {
 	if err := wt.checkMutable(now); err != nil {
 		return err
@@ -313,24 +321,26 @@ func (wt *WagerTransaction) IncrementAttempts(now time.Time) error {
 	return nil
 }
 
-func (wt WagerTransaction) ID() string                             { return wt.id }
-func (wt WagerTransaction) Origin() Origin                         { return wt.origin }
-func (wt WagerTransaction) ProviderID() string                     { return wt.providerID }
-func (wt WagerTransaction) ExternalTransactionID() string          { return wt.externalTransactionID }
-func (wt WagerTransaction) IdempotencyKey() string                 { return wt.idempotencyKey }
-func (wt WagerTransaction) PayloadHash() string                    { return wt.payloadHash }
-func (wt WagerTransaction) WalletID() string                       { return wt.walletID }
-func (wt WagerTransaction) PlayerID() string                       { return wt.playerID }
-func (wt WagerTransaction) RoundID() string                        { return wt.roundID }
-func (wt WagerTransaction) GameID() string                         { return wt.gameID }
-func (wt WagerTransaction) Kind() wager.Kind                       { return wt.kind }
-func (wt WagerTransaction) Status() wager.Status                   { return wt.status }
-func (wt WagerTransaction) Money() money.Money                     { return wt.money }
-func (wt WagerTransaction) ReferenceExternalTransactionID() string { return wt.referenceExternalTransactionID }
-func (wt WagerTransaction) ReferenceTransactionID() string         { return wt.referenceTransactionID }
-func (wt WagerTransaction) FailureCode() string                    { return wt.failureCode }
-func (wt WagerTransaction) ObservedBalance() money.Money           { return wt.observedBalance }
-func (wt WagerTransaction) ObservedWalletVersion() int64           { return wt.observedWalletVersion }
-func (wt WagerTransaction) Attempts() int32                        { return wt.attempts }
-func (wt WagerTransaction) CreatedAt() time.Time                   { return wt.createdAt }
-func (wt WagerTransaction) UpdatedAt() time.Time                   { return wt.updatedAt }
+func (wt WagerTransaction) ID() string                    { return wt.id }
+func (wt WagerTransaction) Origin() Origin                { return wt.origin }
+func (wt WagerTransaction) ProviderID() string            { return wt.providerID }
+func (wt WagerTransaction) ExternalTransactionID() string { return wt.externalTransactionID }
+func (wt WagerTransaction) IdempotencyKey() string        { return wt.idempotencyKey }
+func (wt WagerTransaction) PayloadHash() string           { return wt.payloadHash }
+func (wt WagerTransaction) WalletID() string              { return wt.walletID }
+func (wt WagerTransaction) PlayerID() string              { return wt.playerID }
+func (wt WagerTransaction) RoundID() string               { return wt.roundID }
+func (wt WagerTransaction) GameID() string                { return wt.gameID }
+func (wt WagerTransaction) Kind() wager.Kind              { return wt.kind }
+func (wt WagerTransaction) Status() wager.Status          { return wt.status }
+func (wt WagerTransaction) Money() money.Money            { return wt.money }
+func (wt WagerTransaction) ReferenceExternalTransactionID() string {
+	return wt.referenceExternalTransactionID
+}
+func (wt WagerTransaction) ReferenceTransactionID() string { return wt.referenceTransactionID }
+func (wt WagerTransaction) FailureCode() string            { return wt.failureCode }
+func (wt WagerTransaction) ObservedBalance() money.Money   { return wt.observedBalance }
+func (wt WagerTransaction) ObservedWalletVersion() int64   { return wt.observedWalletVersion }
+func (wt WagerTransaction) Attempts() int32                { return wt.attempts }
+func (wt WagerTransaction) CreatedAt() time.Time           { return wt.createdAt }
+func (wt WagerTransaction) UpdatedAt() time.Time           { return wt.updatedAt }

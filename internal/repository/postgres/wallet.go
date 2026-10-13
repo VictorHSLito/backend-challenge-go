@@ -372,3 +372,61 @@ func (r *WalletRepo) GetTransactionByProviderIdempotencyKeyTx(ctx context.Contex
 	}
 	return wt, true, nil
 }
+
+func (r *WalletRepo) GetTransactionByIDTx(ctx context.Context, tx pgx.Tx, id string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE id = $1
+	`
+	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get transaction by id tx: %w", err)
+	}
+	return wt, true, nil
+}
+
+func (r *WalletRepo) GetTransactionByProviderExternalIDTx(ctx context.Context, tx pgx.Tx, providerID, externalTxID string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE provider_id = $1 AND external_transaction_id = $2
+	`
+	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, providerID, externalTxID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get transaction by provider external id tx: %w", err)
+	}
+	return wt, true, nil
+}
+
+func (r *WalletRepo) GetProcessedReversalTx(ctx context.Context, tx pgx.Tx, providerID, originalTransactionID string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE reference_transaction_id = $1 AND status = 'PROCESSED'
+		LIMIT 1
+	`
+	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, originalTransactionID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get processed reversal tx: %w", err)
+	}
+	return wt, true, nil
+}
