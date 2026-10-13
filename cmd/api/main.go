@@ -19,16 +19,13 @@ func main() {
 		fx.Provide(
 			config.LoadConfig,
 			logger.NewLogger,
-			postgres.NewWalletRepo,
-			func(r *postgres.WalletRepo) service.WalletRepository {
-				return r
-			},
-			service.NewService,
 		),
 		fx.WithLogger(func(l *slog.Logger) fxevent.Logger {
 			return &fxevent.SlogLogger{Logger: l}
 		}),
 		pgdb.Module,
+		postgres.Module,
+		service.Module,
 		httpapi.Module,
 	).Run()
 }
