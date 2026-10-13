@@ -1,17 +1,25 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 
+	"github.com/victorhslito/junglegaming/internal/config"
+	"github.com/victorhslito/junglegaming/internal/httpapi"
+	"github.com/victorhslito/junglegaming/internal/logger"
+	"github.com/victorhslito/junglegaming/internal/postgres"
 	"go.uber.org/fx"
-
-	"github.com/joho/godotenv"
-	"github.com/victorhslito/junglegaming/internal/app"
+	"go.uber.org/fx/fxevent"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Printf("warnig: .env not found: %v", err)
-	}
-	fx.New(app.Options()).Run()
+	fx.New(
+		fx.Provide(
+			config.LoadConfig,
+			logger.NewLogger),
+		fx.WithLogger(func(l *slog.Logger) fxevent.Logger {
+			return &fxevent.SlogLogger{Logger: l}
+		}),
+		postgres.Module,
+		httpapi.Module,
+	).Run()
 }
