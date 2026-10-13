@@ -18,10 +18,12 @@ func LoadConfig() (Config, error) {
 	if port == "" {
 		port = "8080"
 	}
+
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		return Config{}, fmt.Errorf("unable to connect to database")
+		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
+
 	return Config{
 		HTTPPort:    port,
 		DatabaseURL: databaseURL,
