@@ -34,7 +34,7 @@ type ProcessTransactionResult struct {
 	Status           wager.Status `json:"status"`
 	Balance          money.Money  `json:"balance"`
 	FailureCode      string       `json:"failureCode"`
-	IdempotentReplay bool         `json:"idempotencyKey"`
+	IdempotentReplay bool         `json:"idempotentReplay"`
 }
 
 func PayloadHash(cmd ProcessTransactionCommand) string {
