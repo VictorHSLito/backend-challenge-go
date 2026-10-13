@@ -25,7 +25,7 @@ func Register(lc fx.Lifecycle, srv *http.Server, logger *slog.Logger) {
 		OnStart: func(ctx context.Context) error {
 			logger.Info("HTTP server listening", "addr", srv.Addr)
 			go func() {
-				if err := srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
+				if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 					logger.Error("http server error", "error", err)
 				}
 			}()
