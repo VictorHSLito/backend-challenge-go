@@ -22,6 +22,8 @@ type Repository interface {
 	GetWalletForUpdateTx(ctx context.Context, tx pgx.Tx, id string) (wallet.Wallet, bool, error)
 	InsertWagerTransactionTx(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction) error
 	InsertLedgerEntryTx(ctx context.Context, tx pgx.Tx, e ledger.Entry) error
+	GetTransactionByID(ctx context.Context, id string) (transaction.WagerTransaction, bool, error)
+	GetTransactionByProviderExternalID(ctx context.Context, providerID, externalTxID string) (transaction.WagerTransaction, bool, error)
 }
 
 type Service struct {
@@ -91,4 +93,34 @@ func (s *Service) GetWallet(ctx context.Context, walletID string) (wallet.Wallet
 	}
 
 	return w, nil
+}
+
+func (s *Service) GetTransaction(ctx context.Context, id string) (transaction.WagerTransaction, error) {
+	if strings.TrimSpace(id) == "" {
+		return transaction.WagerTransaction{}, fmt.Errorf("%w: transaction ID cannot be empty", transaction.ErrInvalidTransaction)
+	}
+
+	wt, found, err := s.repo.GetTransactionByID(ctx, id)
+	if err != nil {
+		return transaction.WagerTransaction{}, fmt.Errorf("failed to get transaction by id: %w", err)
+	}
+	if !found {
+		return transaction.WagerTransaction{}, ErrTransactionNotFound
+	}
+
+	return wt, nil
+}
+func (s *Service) GetTransactionByProvider(ctx context.Context, providerID, externalTxID string) (transaction.WagerTransaction, error) {
+	if strings.TrimSpace(providerID) == "" || strings.TrimSpace(externalTxID) == "" {
+		return transaction.WagerTransaction{}, fmt.Errorf("%w: providerID and externalTxID cannot be empty", transaction.ErrInvalidTransaction)
+	}
+
+	wt, found, err := s.repo.GetTransactionByProviderExternalID(ctx, providerID, externalTxID)
+	if err != nil {
+		return transaction.WagerTransaction{}, fmt.Errorf("failed to get transaction by provider external ID: %w", err)
+	}
+	if !found {
+		return transaction.WagerTransaction{}, ErrTransactionNotFound
+	}
+	return wt, nil
 }

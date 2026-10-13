@@ -13,6 +13,7 @@ import (
 	"github.com/victorhslito/junglegaming/internal/domain/ledger"
 	"github.com/victorhslito/junglegaming/internal/domain/money"
 	"github.com/victorhslito/junglegaming/internal/domain/transaction"
+	"github.com/victorhslito/junglegaming/internal/domain/wager"
 	"github.com/victorhslito/junglegaming/internal/domain/wallet"
 	"github.com/victorhslito/junglegaming/internal/service"
 )
@@ -238,4 +239,101 @@ func (r *WalletRepo) GetWalletForUpdateTx(ctx context.Context, tx pgx.Tx, id str
 	}
 
 	return w, true, nil
+}
+
+func scanWagerTransaction(row pgx.Row) (transaction.WagerTransaction, error) {
+	var (
+		id, originStr, providerID, externalTxID, idempotencyKey, payloadHash string
+		walletID, playerID                                                   string
+		roundID, gameID                                                      sql.NullString
+		kindStr, statusStr                                                   string
+		amount                                                               int64
+		currency                                                             string
+		refExtTxID, refTxID, failureCode                                     sql.NullString
+		obsBalanceAmount, obsWalletVersion                                   sql.NullInt64
+		attempts                                                             int32
+		createdAt, updatedAt                                                 time.Time
+	)
+
+	err := row.Scan(
+		&id, &originStr, &providerID, &externalTxID, &idempotencyKey, &payloadHash,
+		&walletID, &playerID, &roundID, &gameID, &kindStr, &statusStr, &amount, &currency,
+		&refExtTxID, &refTxID, &failureCode, &obsBalanceAmount, &obsWalletVersion,
+		&attempts, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		return transaction.WagerTransaction{}, err
+	}
+
+	origin, err := transaction.ParseOrigin(originStr)
+	if err != nil {
+		return transaction.WagerTransaction{}, err
+	}
+	kind, err := wager.ParseKind(kindStr)
+	if err != nil {
+		return transaction.WagerTransaction{}, err
+	}
+	status, err := wager.ParseStatus(statusStr)
+	if err != nil {
+		return transaction.WagerTransaction{}, err
+	}
+	m, err := money.New(amount, currency)
+	if err != nil {
+		return transaction.WagerTransaction{}, err
+	}
+
+	var obsBalance money.Money
+	if obsBalanceAmount.Valid {
+		obsBalance, _ = money.New(obsBalanceAmount.Int64, currency)
+	}
+
+	var version int64
+	if obsWalletVersion.Valid {
+		version = obsWalletVersion.Int64
+	}
+
+	return transaction.Rehydrate(
+		id, origin, providerID, externalTxID, idempotencyKey, payloadHash,
+		walletID, playerID, roundID.String, gameID.String, kind, status, m,
+		refExtTxID.String, refTxID.String, failureCode.String,
+		obsBalance, version, attempts, createdAt, updatedAt,
+	)
+}
+
+func (r *WalletRepo) GetTransactionByID(ctx context.Context, id string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE id = $1
+	`
+	wt, err := scanWagerTransaction(r.pool.QueryRow(ctx, query, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get transaction by id: %w", err)
+	}
+	return wt, true, nil
+}
+
+func (r *WalletRepo) GetTransactionByProviderExternalID(ctx context.Context, providerID, externalTxID string) (transaction.WagerTransaction, bool, error) {
+	query := `
+		SELECT id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		       wallet_id, player_id, round_id, game_id, kind, status, amount, currency,
+		       reference_external_transaction_id, reference_transaction_id, failure_code,
+		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
+		FROM wager_transactions
+		WHERE provider_id = $1 AND external_transaction_id = $2
+	`
+	wt, err := scanWagerTransaction(r.pool.QueryRow(ctx, query, providerID, externalTxID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return transaction.WagerTransaction{}, false, nil
+		}
+		return transaction.WagerTransaction{}, false, fmt.Errorf("failed to get transaction by provider external id: %w", err)
+	}
+	return wt, true, nil
 }
