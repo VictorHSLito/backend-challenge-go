@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 
+	"github.com/victorhslito/junglegaming/internal/auth"
 	"github.com/victorhslito/junglegaming/internal/config"
 	"github.com/victorhslito/junglegaming/internal/httpapi"
 	"github.com/victorhslito/junglegaming/internal/logger"
@@ -28,6 +29,7 @@ func main() {
 		postgres.Module,
 		service.Module,
 		resolver.Module,
+		auth.Module,
 		httpapi.Module,
 	).Run()
 }

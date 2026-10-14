@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorhslito/junglegaming/internal/auth"
 	"github.com/victorhslito/junglegaming/internal/domain/money"
 	"github.com/victorhslito/junglegaming/internal/domain/transaction"
 	"github.com/victorhslito/junglegaming/internal/domain/wager"
@@ -113,6 +114,15 @@ func GetTransactionHandler(svc *service.TransactionService, log *slog.Logger) ht
 			return
 		}
 
+		// Provider isolation: non-internal callers only see their own rows.
+		// We answer 404 (not 403) so a provider cannot probe another
+		// provider's transaction ids.
+		principal, _ := auth.FromContext(r.Context())
+		if !principal.IsInternal && wt.ProviderID() != principal.ProviderID {
+			writeError(w, http.StatusNotFound, "TRANSACTION_NOT_FOUND", "transaction not found")
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(toTransactionResponse(wt))
@@ -126,6 +136,15 @@ func GetTransactionByProviderHandler(svc *service.TransactionService, log *slog.
 
 		if providerID == "" || externalTxID == "" {
 			writeError(w, http.StatusBadRequest, "MISSING_FIELD", "providerId and externalTxId are required")
+			return
+		}
+
+		// A provider is only allowed to query its own path; internal callers
+		// may query any provider's path. 404 rather than 403 to avoid
+		// disclosing which providerIds exist.
+		principal, _ := auth.FromContext(r.Context())
+		if !principal.IsInternal && providerID != principal.ProviderID {
+			writeError(w, http.StatusNotFound, "TRANSACTION_NOT_FOUND", "transaction not found")
 			return
 		}
 
@@ -164,6 +183,15 @@ func CreateTransactionHandler(svc *service.TransactionService, logger *slog.Logg
 
 		if strings.TrimSpace(req.ProviderID) == "" || strings.TrimSpace(req.ExternalTransactionID) == "" {
 			writeError(w, http.StatusBadRequest, "MISSING_FIELD", "providerId and externalTransactionId are required")
+			return
+		}
+
+		// The authenticated identity is the source of truth for providerId.
+		// Refuse any attempt to submit a transaction under another provider's
+		// id, even if the body is otherwise identical to a legitimate one.
+		principal, _ := auth.FromContext(r.Context())
+		if req.ProviderID != principal.ProviderID {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "providerId does not match the authenticated client")
 			return
 		}
 
