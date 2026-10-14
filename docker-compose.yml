@@ -79,8 +79,15 @@ services:
       HTTP_PORT: "8080"
       # Database — use the compose service name, not localhost.
       DATABASE_URL: postgres://${POSTGRES_USER:-wager-admin}:${POSTGRES_PASSWORD:-wager-admin}@postgres:5432/${POSTGRES_DB:-wager_db}?sslmode=disable
-      # OIDC — same host-visible port (8180) because the app lives on the compose network.
-      OIDC_ISSUER_URL: http://keycloak:8080/realms/wager
+      # OIDC — Keycloak advertises its issuer as http://localhost:8180/... (the
+      # user-facing URL) because of KC_HOSTNAME, so that's what every token's
+      # `iss` claim says and that's what the API has to trust. But the API
+      # itself can't reach `localhost:8180` from inside its container — on the
+      # compose network Keycloak lives at `keycloak:8080`. OIDC_DISCOVERY_URL
+      # points at the Docker-network address for the one-off discovery call;
+      # OIDC_ISSUER_URL is the canonical issuer the verifier enforces per token.
+      OIDC_ISSUER_URL: http://localhost:8180/realms/wager
+      OIDC_DISCOVERY_URL: http://keycloak:8080/realms/wager
       OIDC_AUDIENCE: wager-api
       OIDC_INTERNAL_ROLE: internal
       # SQS — LocalStack endpoint on the compose network.
