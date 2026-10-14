@@ -10,7 +10,17 @@ import (
 // Config is the slice of settings the validator needs. The httpapi/auth
 // package consumes it; config.Config maps env vars onto it inside module.go.
 type Config struct {
-	IssuerURL    string
+	// IssuerURL is the canonical issuer value that MUST appear in every
+	// token's `iss` claim and in the IdP's own discovery document.
+	IssuerURL string
+
+	// DiscoveryURL is where we actually fetch /.well-known/openid-configuration.
+	// Optional — defaults to IssuerURL. Use this when the API process can't
+	// reach the IdP at the same URL end users do (classic case: inside a
+	// Docker Compose network the IdP is `http://keycloak:8080` but tokens
+	// obtained by users on the host say `iss: http://localhost:8180/...`).
+	DiscoveryURL string
+
 	Audience     string
 	InternalRole string
 }
@@ -40,9 +50,25 @@ func NewValidator(ctx context.Context, cfg Config) (*Validator, error) {
 		return nil, fmt.Errorf("auth: OIDC issuer URL is required")
 	}
 
-	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
+	discoveryURL := cfg.DiscoveryURL
+	if discoveryURL == "" {
+		discoveryURL = cfg.IssuerURL
+	}
+
+	// If we fetch discovery from a different URL than the issuer we trust,
+	// go-oidc's default refuses the mismatch. InsecureIssuerURLContext tells
+	// it "yes, we KNOW the discovery doc will advertise a different URL;
+	// trust the IssuerURL I provided". The *token* verifier below still
+	// enforces that every token's `iss` claim equals cfg.IssuerURL, so a
+	// token from any other issuer is still rejected.
+	discoveryCtx := ctx
+	if discoveryURL != cfg.IssuerURL {
+		discoveryCtx = oidc.InsecureIssuerURLContext(ctx, cfg.IssuerURL)
+	}
+
+	provider, err := oidc.NewProvider(discoveryCtx, discoveryURL)
 	if err != nil {
-		return nil, fmt.Errorf("auth: oidc discovery failed for issuer %q: %w", cfg.IssuerURL, err)
+		return nil, fmt.Errorf("auth: oidc discovery failed for %q (expected issuer %q): %w", discoveryURL, cfg.IssuerURL, err)
 	}
 
 	oidcCfg := &oidc.Config{

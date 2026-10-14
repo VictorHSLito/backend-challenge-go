@@ -13,6 +13,7 @@ type Config struct {
 
 	// OIDC
 	OIDCIssuerURL    string
+	OIDCDiscoveryURL string // optional; defaults to OIDCIssuerURL
 	OIDCAudience     string
 	OIDCInternalRole string
 
@@ -66,6 +67,7 @@ func LoadConfig() (Config, error) {
 		HTTPPort:         port,
 		DatabaseURL:      databaseURL,
 		OIDCIssuerURL:    issuer,
+		OIDCDiscoveryURL: os.Getenv("OIDC_DISCOVERY_URL"),
 		OIDCAudience:     os.Getenv("OIDC_AUDIENCE"),
 		OIDCInternalRole: internalRole,
 

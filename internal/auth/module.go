@@ -20,9 +20,13 @@ func newValidator(cfg config.Config, logger *slog.Logger) (*Validator, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	logger.Info("initializing OIDC validator", "issuer", cfg.OIDCIssuerURL, "audience", cfg.OIDCAudience)
+	logger.Info("initializing OIDC validator",
+		"issuer", cfg.OIDCIssuerURL,
+		"discovery_url", cfg.OIDCDiscoveryURL,
+		"audience", cfg.OIDCAudience)
 	v, err := NewValidator(ctx, Config{
 		IssuerURL:    cfg.OIDCIssuerURL,
+		DiscoveryURL: cfg.OIDCDiscoveryURL,
 		Audience:     cfg.OIDCAudience,
 		InternalRole: cfg.OIDCInternalRole,
 	})
