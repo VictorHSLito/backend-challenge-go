@@ -21,6 +21,7 @@ type Repository interface {
 	GetWalletByID(ctx context.Context, id string) (wallet.Wallet, bool, error)
 	GetWalletForUpdateTx(ctx context.Context, tx pgx.Tx, id string) (wallet.Wallet, bool, error)
 	InsertWagerTransactionTx(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction) error
+	UpdateWagerTransactionTx(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction) error
 	InsertLedgerEntryTx(ctx context.Context, tx pgx.Tx, e ledger.Entry) error
 	GetTransactionByID(ctx context.Context, id string) (transaction.WagerTransaction, bool, error)
 	GetTransactionByIDTx(ctx context.Context, tx pgx.Tx, id string) (transaction.WagerTransaction, bool, error)
@@ -29,6 +30,9 @@ type Repository interface {
 	UpdateWalletTx(ctx context.Context, tx pgx.Tx, w wallet.Wallet) error
 	GetTransactionByProviderIdempotencyKeyTx(ctx context.Context, tx pgx.Tx, providerID, idempotencyKey string) (transaction.WagerTransaction, bool, error)
 	GetProcessedReversalTx(ctx context.Context, tx pgx.Tx, providerID, externalTxID string) (transaction.WagerTransaction, bool, error)
+	FetchOneDuePendingReferenceTx(ctx context.Context, tx pgx.Tx, now time.Time) (transaction.WagerTransaction, bool, error)
+	ListLedgerEntries(ctx context.Context, walletID string, cursorCreatedAt time.Time, cursorID string, limit int) ([]ledger.Entry, bool, time.Time, string, error)
+	SumLedgerForWallet(ctx context.Context, walletID string) (creditSum, debitSum int64, currency string, checkedEntries int, err error)
 }
 
 type Service struct {
@@ -128,4 +132,101 @@ func (s *Service) GetTransactionByProvider(ctx context.Context, providerID, exte
 		return transaction.WagerTransaction{}, ErrTransactionNotFound
 	}
 	return wt, nil
+}
+
+type LedgerPage struct {
+	Entries    []ledger.Entry
+	NextCursor string
+}
+
+func (s *Service) GetLedger(ctx context.Context, walletID, cursor string, limit int) (LedgerPage, error) {
+	if strings.TrimSpace(walletID) == "" {
+		return LedgerPage{}, fmt.Errorf("%w: walletID cannot be empty", wallet.ErrInvalidWallet)
+	}
+	if _, found, err := s.repo.GetWalletByID(ctx, walletID); err != nil {
+		return LedgerPage{}, fmt.Errorf("failed to resolve wallet for ledger: %w", err)
+	} else if !found {
+		return LedgerPage{}, ErrWalletNotFound
+	}
+
+	cursorCreatedAt, cursorID, err := DecodeLedgerCursor(cursor)
+	if err != nil {
+		return LedgerPage{}, err
+	}
+
+	entries, hasMore, nextTime, nextID, err := s.repo.ListLedgerEntries(ctx, walletID, cursorCreatedAt, cursorID, limit)
+	if err != nil {
+		return LedgerPage{}, err
+	}
+
+	var nextCursor string
+	if hasMore {
+		nextCursor = EncodeLedgerCursor(nextTime, nextID)
+	}
+	return LedgerPage{Entries: entries, NextCursor: nextCursor}, nil
+}
+
+type ReconciliationResult struct {
+	WalletID           string
+	StoredBalance      money.Money
+	CalculatedBalance  money.Money
+	Difference         money.Money
+	Consistent         bool
+	CheckedEntries     int
+}
+
+func (s *Service) Reconcile(ctx context.Context, walletID string) (ReconciliationResult, error) {
+	if strings.TrimSpace(walletID) == "" {
+		return ReconciliationResult{}, fmt.Errorf("%w: walletID cannot be empty", wallet.ErrInvalidWallet)
+	}
+
+	var result ReconciliationResult
+	err := s.repo.RunInTx(ctx, func(tx pgx.Tx) error {
+		w, found, err := s.repo.GetWalletForUpdateTx(ctx, tx, walletID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return ErrWalletNotFound
+		}
+
+		creditSum, debitSum, currency, checked, err := s.repo.SumLedgerForWallet(ctx, walletID)
+		if err != nil {
+			return err
+		}
+		if currency == "" {
+			currency = w.Balance().Currency()
+		}
+
+		calculated, err := money.New(creditSum-debitSum, currency)
+		if err != nil {
+			return err
+		}
+		stored := w.Balance()
+		diff, err := stored.Subtract(calculated)
+		if err != nil {
+			return err
+		}
+
+		result = ReconciliationResult{
+			WalletID:          w.ID(),
+			StoredBalance:     stored,
+			CalculatedBalance: calculated,
+			Difference:        diff,
+			Consistent:        diff.IsZero(),
+			CheckedEntries:    checked,
+		}
+		if !result.Consistent {
+			s.logger.Warn("reconciliation divergence",
+				"wallet_id", walletID,
+				"stored", stored.Amount(),
+				"calculated", calculated.Amount(),
+				"difference", diff.Amount())
+		}
+		return nil
+	})
+	if err != nil {
+		return ReconciliationResult{}, err
+	}
+	return result, nil
 }

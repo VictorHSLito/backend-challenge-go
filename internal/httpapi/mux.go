@@ -15,6 +15,8 @@ func NewMux(pool *pgxpool.Pool, svc *service.Service, logger *slog.Logger) *http
 
 	mux.HandleFunc("POST /wallets", CreateWalletHandler(svc, logger))
 	mux.HandleFunc("GET /wallets/{walletId}", GetWalletHandler(svc, logger))
+	mux.HandleFunc("GET /wallets/{walletId}/ledger", GetLedgerHandler(svc, logger))
+	mux.HandleFunc("POST /wallets/{walletId}/reconciliation", ReconciliationHandler(svc, logger))
 
 	mux.HandleFunc("GET /wagering/transactions/{transactionId}", GetTransactionHandler(svc, logger))
 	mux.HandleFunc("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", GetTransactionByProviderHandler(svc, logger))

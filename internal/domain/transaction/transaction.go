@@ -62,6 +62,7 @@ type WagerTransaction struct {
 	observedBalance                money.Money
 	observedWalletVersion          int64
 	attempts                       int32
+	nextAttemptAt                  time.Time
 	createdAt                      time.Time
 	updatedAt                      time.Time
 }
@@ -138,7 +139,7 @@ func NewOpening(id, walletID, playerID string, amount money.Money, now time.Time
 func Rehydrate(
 	id string, origin Origin, providerID, externalTxID, idempotencyKey, payloadHash, walletID, playerID, roundID, gameID string,
 	kind wager.Kind, status wager.Status, amount money.Money, referenceExtTxID, referenceTxID, failureCode string,
-	observedBalance money.Money, observedWalletVersion int64, attempts int32, createdAt, updatedAt time.Time,
+	observedBalance money.Money, observedWalletVersion int64, attempts int32, nextAttemptAt time.Time, createdAt, updatedAt time.Time,
 ) (WagerTransaction, error) {
 	if id == "" || walletID == "" || playerID == "" || providerID == "" || externalTxID == "" || idempotencyKey == "" {
 		return WagerTransaction{}, fmt.Errorf("%w: missing mandatory fields during rehydration", ErrInvalidTransaction)
@@ -206,6 +207,7 @@ func Rehydrate(
 		observedBalance:                observedBalance,
 		observedWalletVersion:          observedWalletVersion,
 		attempts:                       attempts,
+		nextAttemptAt:                  nextAttemptAt,
 		createdAt:                      createdAt,
 		updatedAt:                      updatedAt,
 	}, nil
@@ -321,6 +323,22 @@ func (wt *WagerTransaction) IncrementAttempts(now time.Time) error {
 	return nil
 }
 
+func (wt *WagerTransaction) ScheduleRetry(nextAttemptAt, now time.Time) error {
+	if err := wt.checkMutable(now); err != nil {
+		return err
+	}
+	if wt.status != wager.StatusPendingReference {
+		return fmt.Errorf("%w: ScheduleRetry only valid for PENDING_REFERENCE, got %s", wager.ErrInvalidTransition, wt.status)
+	}
+	if nextAttemptAt.IsZero() || nextAttemptAt.Before(now) {
+		return fmt.Errorf("%w: nextAttemptAt must be a future timestamp", ErrInvalidTransaction)
+	}
+	wt.attempts++
+	wt.nextAttemptAt = nextAttemptAt
+	wt.updatedAt = now
+	return nil
+}
+
 func (wt WagerTransaction) ID() string                    { return wt.id }
 func (wt WagerTransaction) Origin() Origin                { return wt.origin }
 func (wt WagerTransaction) ProviderID() string            { return wt.providerID }
@@ -342,5 +360,6 @@ func (wt WagerTransaction) FailureCode() string            { return wt.failureCo
 func (wt WagerTransaction) ObservedBalance() money.Money   { return wt.observedBalance }
 func (wt WagerTransaction) ObservedWalletVersion() int64   { return wt.observedWalletVersion }
 func (wt WagerTransaction) Attempts() int32                { return wt.attempts }
+func (wt WagerTransaction) NextAttemptAt() time.Time       { return wt.nextAttemptAt }
 func (wt WagerTransaction) CreatedAt() time.Time           { return wt.createdAt }
 func (wt WagerTransaction) UpdatedAt() time.Time           { return wt.updatedAt }

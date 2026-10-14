@@ -8,6 +8,7 @@ import (
 	"github.com/victorhslito/junglegaming/internal/logger"
 	"github.com/victorhslito/junglegaming/internal/pgdb"
 	"github.com/victorhslito/junglegaming/internal/repository/postgres"
+	"github.com/victorhslito/junglegaming/internal/resolver"
 	"github.com/victorhslito/junglegaming/internal/service"
 
 	"go.uber.org/fx"
@@ -26,6 +27,7 @@ func main() {
 		pgdb.Module,
 		postgres.Module,
 		service.Module,
+		resolver.Module,
 		httpapi.Module,
 	).Run()
 }

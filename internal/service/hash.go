@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,33 +82,6 @@ func toReplayResult(wt transaction.WagerTransaction) ProcessTransactionResult {
 	}
 }
 
-func isReversible(reversal, original wager.Kind) bool {
-	if reversal == wager.KindRefund {
-		return original == wager.KindBet
-	}
-	if reversal == wager.KindRollback {
-		switch original {
-		case wager.KindBet, wager.KindWin, wager.KindRefund:
-			return true
-		}
-	}
-	return false
-}
-
-func reversalDirection(reversal, original wager.Kind) wager.Direction {
-	if reversal == wager.KindRefund {
-		return wager.DirectionCredit
-	}
-	switch original {
-	case wager.KindBet:
-		return wager.DirectionCredit
-	case wager.KindWin:
-		return wager.DirectionDebit
-	case wager.KindRefund:
-		return wager.DirectionDebit
-	}
-	panic("unreachable")
-}
 
 func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string, cmd ProcessTransactionCommand) (ProcessTransactionResult, error) {
 	switch cmd.Kind {
@@ -178,6 +152,30 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 			return nil
 		}
 
+		persistPendingReference := func(refInternalID string) error {
+			if refInternalID != "" {
+				if err := wt.BindReference(refInternalID, now); err != nil {
+					return err
+				}
+			}
+			if err := wt.SetObservedBalance(balanceBefore); err != nil {
+				return err
+			}
+			if err := wt.MarkPendingReference(now); err != nil {
+				return err
+			}
+			if err := s.repo.InsertWagerTransactionTx(ctx, tx, wt); err != nil {
+				return err
+			}
+			result = ProcessTransactionResult{
+				TransactionID:    wt.ID(),
+				Status:           wt.Status(),
+				Balance:          balanceBefore,
+				IdempotentReplay: false,
+			}
+			return nil
+		}
+
 		switch cmd.Kind {
 		case wager.KindBet:
 			if err := w.Debit(cmd.Money, now); err != nil {
@@ -242,11 +240,17 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 				return err
 			}
 			if !found {
-				return persistRejected(FailureReferenceNotFound, "")
+				return persistPendingReference("")
 			}
 
-			if ref.Status() != wager.StatusProcessed {
+			switch ref.Status() {
+			case wager.StatusPending, wager.StatusPendingReference:
+				return persistPendingReference(ref.ID())
+			case wager.StatusRejected, wager.StatusFailed:
 				return persistRejected(FailureReferenceNotProcessed, ref.ID())
+			case wager.StatusProcessed:
+			default:
+				return fmt.Errorf("unexpected reference status %q", ref.Status())
 			}
 
 			if ref.ProviderID() != cmd.ProviderID ||
@@ -265,7 +269,7 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 				return persistRejected(FailureReferenceAmountMismatch, ref.ID())
 			}
 
-			if !isReversible(cmd.Kind, ref.Kind()) {
+			if !wager.IsReversible(cmd.Kind, ref.Kind()) {
 				return persistRejected(FailureReferenceUnreversable, ref.ID())
 			}
 
@@ -281,7 +285,10 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 				return err
 			}
 
-			direction := reversalDirection(cmd.Kind, ref.Kind())
+			direction, err := wager.ReversalDirection(cmd.Kind, ref.Kind())
+			if err != nil {
+				return err
+			}
 			if direction == wager.DirectionCredit {
 				if err := w.Credit(cmd.Money, now); err != nil {
 					return err

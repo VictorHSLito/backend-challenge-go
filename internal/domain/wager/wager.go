@@ -106,6 +106,34 @@ func ValidateTransition(from, to Status) error {
 	return fmt.Errorf("%w: invalid transition from %s to %s", ErrInvalidTransition, from, to)
 }
 
+func IsReversible(reversal, original Kind) bool {
+	if reversal == KindRefund {
+		return original == KindBet
+	}
+	if reversal == KindRollback {
+		switch original {
+		case KindBet, KindWin, KindRefund:
+			return true
+		}
+	}
+	return false
+}
+
+func ReversalDirection(reversal, original Kind) (Direction, error) {
+	if reversal == KindRefund {
+		return DirectionCredit, nil
+	}
+	if reversal == KindRollback {
+		switch original {
+		case KindBet:
+			return DirectionCredit, nil
+		case KindWin, KindRefund:
+			return DirectionDebit, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s cannot reverse %s", ErrInvalidKindRule, reversal, original)
+}
+
 func (k Kind) ValidateExternal(amount money.Money, referenceExtTxID string) error {
 	if k == KindOpening {
 		return fmt.Errorf("%w: OPENING kind is forbidden at external boundaries", ErrInvalidKindRule)

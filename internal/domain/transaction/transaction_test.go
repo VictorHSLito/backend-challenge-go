@@ -82,6 +82,7 @@ type rehydrateArgs struct {
 	observedBalance                                           money.Money
 	observedWalletVersion                                     int64
 	attempts                                                  int32
+	nextAttemptAt                                             time.Time
 	createdAt, updatedAt                                      time.Time
 }
 
@@ -89,7 +90,7 @@ func (a rehydrateArgs) call() (WagerTransaction, error) {
 	return Rehydrate(a.id, a.origin, a.providerID, a.externalTxID, a.idempotencyKey, a.payloadHash,
 		a.walletID, a.playerID, a.roundID, a.gameID, a.kind, a.status, a.amount,
 		a.referenceExtTxID, a.referenceTxID, a.failureCode, a.observedBalance, a.observedWalletVersion,
-		a.attempts, a.createdAt, a.updatedAt)
+		a.attempts, a.nextAttemptAt, a.createdAt, a.updatedAt)
 }
 
 func validPendingRehydrate(t *testing.T) rehydrateArgs {

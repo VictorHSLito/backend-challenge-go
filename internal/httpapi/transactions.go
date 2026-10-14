@@ -223,8 +223,11 @@ func CreateTransactionHandler(svc *service.Service, logger *slog.Logger) http.Ha
 		}
 
 		statusCode := http.StatusCreated
-		if res.IdempotentReplay {
+		switch {
+		case res.IdempotentReplay:
 			statusCode = http.StatusOK
+		case res.Status == wager.StatusPendingReference:
+			statusCode = http.StatusAccepted
 		}
 
 		w.Header().Set("Content-Type", "application/json")
