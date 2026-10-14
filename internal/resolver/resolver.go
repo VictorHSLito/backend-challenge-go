@@ -32,13 +32,15 @@ func DefaultConfig() Config {
 }
 
 type Resolver struct {
-	repo   service.Repository
+	tx     service.TxManager
+	wallet service.WalletRepository
+	txRepo service.TransactionRepository
 	logger *slog.Logger
 	cfg    Config
 }
 
-func New(repo service.Repository, logger *slog.Logger) *Resolver {
-	return &Resolver{repo: repo, logger: logger, cfg: DefaultConfig()}
+func New(tx service.TxManager, wallet service.WalletRepository, txRepo service.TransactionRepository, logger *slog.Logger) *Resolver {
+	return &Resolver{tx: tx, wallet: wallet, txRepo: txRepo, logger: logger, cfg: DefaultConfig()}
 }
 
 func (r *Resolver) Run(ctx context.Context) {
@@ -63,8 +65,8 @@ func (r *Resolver) Run(ctx context.Context) {
 
 func (r *Resolver) processOne(ctx context.Context) (bool, error) {
 	var processed bool
-	err := r.repo.RunInTx(ctx, func(tx pgx.Tx) error {
-		pending, found, err := r.repo.FetchOneDuePendingReferenceTx(ctx, tx, time.Now())
+	err := r.tx.RunInTx(ctx, func(tx pgx.Tx) error {
+		pending, found, err := r.txRepo.FetchOneDuePendingReferenceTx(ctx, tx, time.Now())
 		if err != nil {
 			return err
 		}
@@ -80,7 +82,7 @@ func (r *Resolver) processOne(ctx context.Context) (bool, error) {
 func (r *Resolver) resolve(ctx context.Context, tx pgx.Tx, pending transaction.WagerTransaction) error {
 	now := time.Now()
 
-	ref, found, err := r.repo.GetTransactionByProviderExternalIDTx(ctx, tx, pending.ProviderID(), pending.ReferenceExternalTransactionID())
+	ref, found, err := r.txRepo.GetTransactionByProviderExternalIDTx(ctx, tx, pending.ProviderID(), pending.ReferenceExternalTransactionID())
 	if err != nil {
 		return err
 	}
@@ -113,7 +115,7 @@ func (r *Resolver) resolve(ctx context.Context, tx pgx.Tx, pending transaction.W
 		return r.finalizeRejected(ctx, tx, &pending, service.FailureReferenceUnreversable, ref.ID(), now)
 	}
 
-	_, foundRev, err := r.repo.GetProcessedReversalTx(ctx, tx, pending.ProviderID(), ref.ID())
+	_, foundRev, err := r.txRepo.GetProcessedReversalTx(ctx, tx, pending.ProviderID(), ref.ID())
 	if err != nil {
 		return err
 	}
@@ -121,7 +123,7 @@ func (r *Resolver) resolve(ctx context.Context, tx pgx.Tx, pending transaction.W
 		return r.finalizeRejected(ctx, tx, &pending, service.FailureReferenceAlreadyReversed, ref.ID(), now)
 	}
 
-	w, wFound, err := r.repo.GetWalletForUpdateTx(ctx, tx, pending.WalletID())
+	w, wFound, err := r.wallet.GetWalletForUpdateTx(ctx, tx, pending.WalletID())
 	if err != nil {
 		return err
 	}
@@ -169,13 +171,13 @@ func (r *Resolver) resolve(ctx context.Context, tx pgx.Tx, pending transaction.W
 		return err
 	}
 
-	if err := r.repo.UpdateWagerTransactionTx(ctx, tx, pending); err != nil {
+	if err := r.txRepo.UpdateWagerTransactionTx(ctx, tx, pending); err != nil {
 		return err
 	}
-	if err := r.repo.UpdateWalletTx(ctx, tx, w); err != nil {
+	if err := r.wallet.UpdateWalletTx(ctx, tx, w); err != nil {
 		return err
 	}
-	if err := r.repo.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
+	if err := r.wallet.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
 		return err
 	}
 
@@ -204,7 +206,7 @@ func (r *Resolver) rescheduleOrGiveUp(ctx context.Context, tx pgx.Tx, pending *t
 	if err := pending.ScheduleRetry(nextAttempt, now); err != nil {
 		return err
 	}
-	if err := r.repo.UpdateWagerTransactionTx(ctx, tx, *pending); err != nil {
+	if err := r.txRepo.UpdateWagerTransactionTx(ctx, tx, *pending); err != nil {
 		return err
 	}
 	r.logger.Info("rescheduled pending reference",
@@ -223,7 +225,7 @@ func (r *Resolver) finalizeRejected(ctx context.Context, tx pgx.Tx, pending *tra
 	if err := pending.MarkRejected(failureCode, now); err != nil {
 		return err
 	}
-	if err := r.repo.UpdateWagerTransactionTx(ctx, tx, *pending); err != nil {
+	if err := r.txRepo.UpdateWagerTransactionTx(ctx, tx, *pending); err != nil {
 		return err
 	}
 	r.logger.Info("rejected pending reference",

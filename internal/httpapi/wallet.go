@@ -37,7 +37,7 @@ func toWalletResponse(w wallet.Wallet) walletResponse {
 	}
 }
 
-func CreateWalletHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func CreateWalletHandler(svc *service.WalletService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req openWalletRequest
 		decoder := json.NewDecoder(r.Body)
@@ -77,7 +77,7 @@ func CreateWalletHandler(svc *service.Service, log *slog.Logger) http.HandlerFun
 	}
 }
 
-func GetWalletHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func GetWalletHandler(svc *service.WalletService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		walletID := r.PathValue("walletId")
 
@@ -133,7 +133,7 @@ func toLedgerEntryResponse(e ledger.Entry) ledgerEntryResponse {
 	}
 }
 
-func GetLedgerHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func GetLedgerHandler(svc *service.WalletService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		walletID := r.PathValue("walletId")
 		if _, err := uuid.Parse(walletID); err != nil {
@@ -195,7 +195,7 @@ type reconciliationResponse struct {
 	CheckedEntries    int         `json:"checkedEntries"`
 }
 
-func ReconciliationHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func ReconciliationHandler(svc *service.WalletService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		walletID := r.PathValue("walletId")
 		if _, err := uuid.Parse(walletID); err != nil {

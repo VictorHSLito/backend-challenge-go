@@ -94,7 +94,7 @@ func toTransactionResponse(wt transaction.WagerTransaction) transactionResponse 
 	}
 }
 
-func GetTransactionHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func GetTransactionHandler(svc *service.TransactionService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		txID := r.PathValue("transactionId")
 		if _, err := uuid.Parse(txID); err != nil {
@@ -119,7 +119,7 @@ func GetTransactionHandler(svc *service.Service, log *slog.Logger) http.HandlerF
 	}
 }
 
-func GetTransactionByProviderHandler(svc *service.Service, log *slog.Logger) http.HandlerFunc {
+func GetTransactionByProviderHandler(svc *service.TransactionService, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		providerID := r.PathValue("providerId")
 		externalTxID := r.PathValue("externalTransactionId")
@@ -146,7 +146,7 @@ func GetTransactionByProviderHandler(svc *service.Service, log *slog.Logger) htt
 	}
 }
 
-func CreateTransactionHandler(svc *service.Service, logger *slog.Logger) http.HandlerFunc {
+func CreateTransactionHandler(svc *service.TransactionService, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		idemKey := r.Header.Get("Idempotency-Key")
 		if strings.TrimSpace(idemKey) == "" {
