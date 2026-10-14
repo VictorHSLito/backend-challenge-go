@@ -1,7 +1,7 @@
 package service
 
 const (
-	FailureInsufficientFunds         = "INSUFICIENT_FUNDS"
+	FailureInsufficientFunds         = "INSUFFICIENT_FUNDS"
 	FailureRollbackInsufficientFunds = "ROLLBACK_INSUFFICIENT_FUNDS"
 	FailureReferenceNotFound         = "REFERENCE_NOT_FOUND"
 	FailureReferenceNotProcessed     = "REFERENCE_NOT_PROCESSED"

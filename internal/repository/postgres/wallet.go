@@ -418,10 +418,13 @@ func (r *WalletRepo) GetProcessedReversalTx(ctx context.Context, tx pgx.Tx, prov
 		       reference_external_transaction_id, reference_transaction_id, failure_code,
 		       observed_balance_amount, observed_wallet_version, attempts, created_at, updated_at
 		FROM wager_transactions
-		WHERE reference_transaction_id = $1 AND status = 'PROCESSED'
+		WHERE reference_transaction_id = $1
+		  AND provider_id = $2
+		  AND status = 'PROCESSED'
+		  AND kind IN ('REFUND', 'ROLLBACK')
 		LIMIT 1
 	`
-	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, originalTransactionID))
+	wt, err := scanWagerTransaction(tx.QueryRow(ctx, query, originalTransactionID, providerID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return transaction.WagerTransaction{}, false, nil

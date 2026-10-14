@@ -155,9 +155,13 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 
 		persistRejected := func(code string, refInternalID string) error {
 			if refInternalID != "" {
-				_ = wt.BindReference(refInternalID, now)
+				if err := wt.BindReference(refInternalID, now); err != nil {
+					return err
+				}
 			}
-			_ = wt.SetObservedBalance(balanceBefore)
+			if err := wt.SetObservedBalance(balanceBefore); err != nil {
+				return err
+			}
 			if err := wt.MarkRejected(code, now); err != nil {
 				return err
 			}
@@ -265,12 +269,11 @@ func (s *Service) ProcessTransaction(ctx context.Context, idempotencyKey string,
 				return persistRejected(FailureReferenceUnreversable, ref.ID())
 			}
 
-			existingRev, foundRev, err := s.repo.GetProcessedReversalTx(ctx, tx, cmd.ProviderID, ref.ID())
+			_, foundRev, err := s.repo.GetProcessedReversalTx(ctx, tx, cmd.ProviderID, ref.ID())
 			if err != nil {
 				return err
 			}
 			if foundRev {
-				_ = existingRev
 				return persistRejected(FailureReferenceAlreadyReversed, ref.ID())
 			}
 
