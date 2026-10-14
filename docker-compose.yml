@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: postgres:16.13
+    container_name: wager_database
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wager-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wager-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-wager_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-wager-admin} -d ${POSTGRES_DB:-wager_db}"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  migrate:
+    image: migrate/migrate:v4.18.1
+    command:
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER:-wager-admin}:${POSTGRES_PASSWORD:-wager-admin}@postgres:5432/${POSTGRES_DB:-wager_db}?sslmode=disable
+      - up
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  localstack:
+    image: localstack/localstack:4.0.3
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./deploy/localstack/init-sqs.sh:/etc/localstack/init/ready.d/init-sqs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    environment:
+      HTTP_PORT: "8080"
+      # Database — use the compose service name, not localhost.
+      DATABASE_URL: postgres://${POSTGRES_USER:-wager-admin}:${POSTGRES_PASSWORD:-wager-admin}@postgres:5432/${POSTGRES_DB:-wager_db}?sslmode=disable
+      # OIDC — Keycloak advertises its issuer as http://localhost:8180/... (the
+      # user-facing URL) because of KC_HOSTNAME, so that's what every token's
+      # `iss` claim says and that's what the API has to trust. But the API
+      # itself can't reach `localhost:8180` from inside its container — on the
+      # compose network Keycloak lives at `keycloak:8080`. OIDC_DISCOVERY_URL
+      # points at the Docker-network address for the one-off discovery call;
+      # OIDC_ISSUER_URL is the canonical issuer the verifier enforces per token.
+      OIDC_ISSUER_URL: http://localhost:8180/realms/wager
+      OIDC_DISCOVERY_URL: http://keycloak:8080/realms/wager
+      OIDC_AUDIENCE: wager-api
+      OIDC_INTERNAL_ROLE: internal
+      # SQS — LocalStack endpoint on the compose network.
+      AWS_REGION: us-east-1
+      SQS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_INPUT_QUEUE: wager-transactions.fifo
+      SQS_EVENTS_QUEUE: wallet-events.fifo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data: {}

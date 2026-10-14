@@ -1,0 +1,15 @@
+info:
+  name: Transaction Info
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: http://localhost:8080/wagering/transactions/01a13512-50d0-73ec-bac4-19d4af1d2be0
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
