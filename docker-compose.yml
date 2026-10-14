@@ -63,7 +63,6 @@ services:
       - "4566:4566"
     volumes:
       - ./deploy/localstack/init-sqs.sh:/etc/localstack/init/ready.d/init-sqs.sh:ro
-      - ./deploy/localstack/policies:/etc/localstack/policies:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
       interval: 3s

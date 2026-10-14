@@ -8,7 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/victorhslito/junglegaming/internal/domain/event"
 	"github.com/victorhslito/junglegaming/internal/domain/ledger"
+	"github.com/victorhslito/junglegaming/internal/domain/money"
 	"github.com/victorhslito/junglegaming/internal/domain/transaction"
 	"github.com/victorhslito/junglegaming/internal/domain/wager"
 	"github.com/victorhslito/junglegaming/internal/domain/wallet"
@@ -35,12 +37,19 @@ type Resolver struct {
 	tx     service.TxManager
 	wallet service.WalletRepository
 	txRepo service.TransactionRepository
+	outbox service.OutboxRepository
 	logger *slog.Logger
 	cfg    Config
 }
 
-func New(tx service.TxManager, wallet service.WalletRepository, txRepo service.TransactionRepository, logger *slog.Logger) *Resolver {
-	return &Resolver{tx: tx, wallet: wallet, txRepo: txRepo, logger: logger, cfg: DefaultConfig()}
+func New(
+	tx service.TxManager,
+	wallet service.WalletRepository,
+	txRepo service.TransactionRepository,
+	outbox service.OutboxRepository,
+	logger *slog.Logger,
+) *Resolver {
+	return &Resolver{tx: tx, wallet: wallet, txRepo: txRepo, outbox: outbox, logger: logger, cfg: DefaultConfig()}
 }
 
 func (r *Resolver) Run(ctx context.Context) {
@@ -180,6 +189,12 @@ func (r *Resolver) resolve(ctx context.Context, tx pgx.Tx, pending transaction.W
 	if err := r.wallet.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
 		return err
 	}
+	if err := r.emitProcessedEvent(ctx, tx, pending, now); err != nil {
+		return err
+	}
+	if err := r.emitBalanceChangedEvent(ctx, tx, pending, w, pending.Money(), balanceBefore, direction, now); err != nil {
+		return err
+	}
 
 	r.logger.Info("resolved pending reference",
 		"transaction_id", pending.ID(),
@@ -228,8 +243,70 @@ func (r *Resolver) finalizeRejected(ctx context.Context, tx pgx.Tx, pending *tra
 	if err := r.txRepo.UpdateWagerTransactionTx(ctx, tx, *pending); err != nil {
 		return err
 	}
+	if err := r.emitRejectedEvent(ctx, tx, *pending, now); err != nil {
+		return err
+	}
 	r.logger.Info("rejected pending reference",
 		"transaction_id", pending.ID(),
 		"failure_code", failureCode)
 	return nil
+}
+
+// --- outbox helpers (same shape as TransactionService's) ---
+
+func (r *Resolver) emitProcessedEvent(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction, now time.Time) error {
+	env, err := event.NewProcessedEvent(wt.ID(), "", now, event.WagerTransactionProcessed{
+		TransactionID:         wt.ID(),
+		ProviderID:            wt.ProviderID(),
+		ExternalTransactionID: wt.ExternalTransactionID(),
+		PlayerID:              wt.PlayerID(),
+		WalletID:              wt.WalletID(),
+		RoundID:               wt.RoundID(),
+		GameID:                wt.GameID(),
+		Kind:                  wt.Kind(),
+		Money:                 wt.Money(),
+	})
+	if err != nil {
+		return err
+	}
+	return r.outbox.InsertEventTx(ctx, tx, env)
+}
+
+func (r *Resolver) emitRejectedEvent(ctx context.Context, tx pgx.Tx, wt transaction.WagerTransaction, now time.Time) error {
+	env, err := event.NewRejectedEvent(wt.ID(), "", now, event.WagerTransactionRejected{
+		TransactionID:         wt.ID(),
+		ProviderID:            wt.ProviderID(),
+		ExternalTransactionID: wt.ExternalTransactionID(),
+		PlayerID:              wt.PlayerID(),
+		WalletID:              wt.WalletID(),
+		RoundID:               wt.RoundID(),
+		GameID:                wt.GameID(),
+		Kind:                  wt.Kind(),
+		Money:                 wt.Money(),
+		FailureCode:           wt.FailureCode(),
+	})
+	if err != nil {
+		return err
+	}
+	return r.outbox.InsertEventTx(ctx, tx, env)
+}
+
+func (r *Resolver) emitBalanceChangedEvent(
+	ctx context.Context, tx pgx.Tx,
+	wt transaction.WagerTransaction, w wallet.Wallet,
+	amount, balanceBefore money.Money, direction wager.Direction, now time.Time,
+) error {
+	env, err := event.NewBalanceChangedEvent(wt.ID(), "", now, event.WalletBalanceChanged{
+		WalletID:      w.ID(),
+		TransactionID: wt.ID(),
+		Direction:     direction,
+		Money:         amount,
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  w.Balance(),
+		WalletVersion: w.Version(),
+	})
+	if err != nil {
+		return err
+	}
+	return r.outbox.InsertEventTx(ctx, tx, env)
 }

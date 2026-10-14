@@ -9,9 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/victorhslito/junglegaming/internal/domain/event"
 	"github.com/victorhslito/junglegaming/internal/domain/ledger"
 	"github.com/victorhslito/junglegaming/internal/domain/money"
 	"github.com/victorhslito/junglegaming/internal/domain/transaction"
+	"github.com/victorhslito/junglegaming/internal/domain/wager"
 	"github.com/victorhslito/junglegaming/internal/domain/wallet"
 )
 
@@ -19,11 +21,18 @@ type WalletService struct {
 	tx     TxManager
 	wallet WalletRepository
 	txRepo TransactionRepository
+	outbox OutboxRepository
 	logger *slog.Logger
 }
 
-func NewWalletService(tx TxManager, wallet WalletRepository, txRepo TransactionRepository, logger *slog.Logger) *WalletService {
-	return &WalletService{tx: tx, wallet: wallet, txRepo: txRepo, logger: logger}
+func NewWalletService(
+	tx TxManager,
+	wallet WalletRepository,
+	txRepo TransactionRepository,
+	outbox OutboxRepository,
+	logger *slog.Logger,
+) *WalletService {
+	return &WalletService{tx: tx, wallet: wallet, txRepo: txRepo, outbox: outbox, logger: logger}
 }
 
 func (s *WalletService) OpenWallet(ctx context.Context, playerID string, initialMoney money.Money) (wallet.Wallet, error) {
@@ -45,6 +54,7 @@ func (s *WalletService) OpenWallet(ctx context.Context, playerID string, initial
 		return wallet.Wallet{}, err
 	}
 
+	// Zero initial balance: no OPENING tx, no ledger, no events (README §9).
 	if initialMoney.IsZero() {
 		if err := s.tx.RunInTx(ctx, func(tx pgx.Tx) error {
 			return s.wallet.InsertWalletTx(ctx, tx, w)
@@ -83,13 +93,51 @@ func (s *WalletService) OpenWallet(ctx context.Context, playerID string, initial
 		if err := s.txRepo.InsertWagerTransactionTx(ctx, tx, opening); err != nil {
 			return err
 		}
-		return s.wallet.InsertLedgerEntryTx(ctx, tx, entry)
+		if err := s.wallet.InsertLedgerEntryTx(ctx, tx, entry); err != nil {
+			return err
+		}
+		if err := s.emitOpeningProcessed(ctx, tx, opening, now); err != nil {
+			return err
+		}
+		return s.emitOpeningBalanceChanged(ctx, tx, w, opening, zero, now)
 	}); err != nil {
 		return wallet.Wallet{}, err
 	}
 
 	s.logger.Info("wallet opened successfully", "wallet_id", w.ID(), "player_id", playerID)
 	return w, nil
+}
+
+func (s *WalletService) emitOpeningProcessed(ctx context.Context, tx pgx.Tx, opening transaction.WagerTransaction, now time.Time) error {
+	env, err := event.NewProcessedEvent(opening.ID(), "", now, event.WagerTransactionProcessed{
+		TransactionID:         opening.ID(),
+		ProviderID:            opening.ProviderID(),
+		ExternalTransactionID: opening.ExternalTransactionID(),
+		PlayerID:              opening.PlayerID(),
+		WalletID:              opening.WalletID(),
+		Kind:                  opening.Kind(),
+		Money:                 opening.Money(),
+	})
+	if err != nil {
+		return err
+	}
+	return s.outbox.InsertEventTx(ctx, tx, env)
+}
+
+func (s *WalletService) emitOpeningBalanceChanged(ctx context.Context, tx pgx.Tx, w wallet.Wallet, opening transaction.WagerTransaction, zeroBefore money.Money, now time.Time) error {
+	env, err := event.NewBalanceChangedEvent(opening.ID(), "", now, event.WalletBalanceChanged{
+		WalletID:      w.ID(),
+		TransactionID: opening.ID(),
+		Direction:     wager.DirectionCredit,
+		Money:         opening.Money(),
+		BalanceBefore: zeroBefore,
+		BalanceAfter:  w.Balance(),
+		WalletVersion: w.Version(),
+	})
+	if err != nil {
+		return err
+	}
+	return s.outbox.InsertEventTx(ctx, tx, env)
 }
 
 func (s *WalletService) GetWallet(ctx context.Context, walletID string) (wallet.Wallet, error) {
