@@ -1,0 +1,20 @@
+# Keep the build context small and the final image free of local junk.
+
+.git/
+.github/
+.vscode/
+.idea/
+*.md
+docs/
+bruno/
+test/
+**/*_test.go
+
+# Local run artefacts
+.env
+.env.local
+*.log
+
+# OS cruft
+.DS_Store
+Thumbs.db

@@ -68,6 +68,38 @@ services:
       interval: 3s
       timeout: 5s
       retries: 30
-      
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    environment:
+      HTTP_PORT: "8080"
+      # Database — use the compose service name, not localhost.
+      DATABASE_URL: postgres://${POSTGRES_USER:-wager-admin}:${POSTGRES_PASSWORD:-wager-admin}@postgres:5432/${POSTGRES_DB:-wager_db}?sslmode=disable
+      # OIDC — same host-visible port (8180) because the app lives on the compose network.
+      OIDC_ISSUER_URL: http://keycloak:8080/realms/wager
+      OIDC_AUDIENCE: wager-api
+      OIDC_INTERNAL_ROLE: internal
+      # SQS — LocalStack endpoint on the compose network.
+      AWS_REGION: us-east-1
+      SQS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_INPUT_QUEUE: wager-transactions.fifo
+      SQS_EVENTS_QUEUE: wallet-events.fifo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data: {}
